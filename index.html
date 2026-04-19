@@ -2353,13 +2353,28 @@ window.deleteProduct = async function(id, name) {
   showLoading(false);
 };
 
-window.resetAllData = async function() {
-  const answer = prompt('⚠️ 모든 데이터(거래처, 상품, 매출)를 삭제합니다.\n확인하려면 "초기화" 를 입력하세요:');
-  if(answer !== '초기화') { alert('취소됐습니다.'); return; }
+window.resetAllData = function() {
+  document.getElementById('modalArea').innerHTML=`
+    <div class="modal-overlay">
+      <div class="modal">
+        <div class="modal-title" style="color:#e53935;">⚠️ 전체 데이터 초기화</div>
+        <p style="font-size:14px;color:#555;margin-bottom:14px;">거래처, 상품, 매출 데이터가 <strong>모두 삭제</strong>됩니다.<br>복구가 불가능합니다. 정말 삭제하시겠어요?</p>
+        <div class="field-label">"초기화" 라고 입력하세요</div>
+        <input class="field-input" id="resetConfirmInput" placeholder="초기화" style="margin-bottom:12px;" />
+        <button class="btn btn-red" style="margin:0 0 8px;" onclick="doResetAllData()">🗑️ 전체 삭제 확인</button>
+        <button class="btn btn-secondary" style="margin:0;" onclick="closeModalDirect()">취소</button>
+      </div>
+    </div>`;
+};
+
+window.doResetAllData = async function() {
+  const val = document.getElementById('resetConfirmInput').value.trim();
+  if(val !== '초기화') { alert('"초기화" 를 정확히 입력하세요.'); return; }
+  closeModalDirect();
   showLoading(true);
   try {
-    const collections = ['sales','clients','products'];
-    for(const col of collections) {
+    const cols = ['sales','clients','products'];
+    for(const col of cols) {
       const snap = await getDocs(collection(db,col));
       for(const d of snap.docs) await deleteDoc(d.ref);
     }
