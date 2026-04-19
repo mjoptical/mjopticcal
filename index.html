@@ -624,6 +624,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
       <div class="field-label">이메일</div><input class="field-input" id="cfg_email" placeholder="회사 이메일" />
       <button class="btn btn-primary" style="margin:8px 0 0;" onclick="saveSettings()">💾 저장</button>
     </div>
+    <div style="margin:12px;background:white;border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.08);border:2px solid #ffebee;">
+      <div style="font-size:15px;font-weight:700;color:#e53935;margin-bottom:8px;">⚠️ 위험 구역</div>
+      <div style="font-size:13px;color:#888;margin-bottom:12px;">모든 거래처, 상품, 매출 데이터를 완전히 삭제합니다. 복구가 불가능합니다.</div>
+      <button class="btn btn-red" style="margin:0;" onclick="resetAllData()">🗑️ 전체 데이터 초기화</button>
+    </div>
   </div>
 </div>
 
@@ -1379,12 +1384,8 @@ window.showSaleDetail = function(id) {
           <span>합계</span><span style="color:${tColor[s.type||'sale']}">${fmt(s.total)}</span>
         </div>
         ${s.supply?`<div style="font-size:12px;color:#888;margin-bottom:12px;">공급가: ${fmt(s.supply)} / VAT: ${fmt(s.vat)}</div>`:''}
+        <button class="btn btn-red" style="margin:0 0 8px;" onclick="deleteSale('${s.id}')">🗑️ 매출 삭제</button>
         <button class="btn btn-secondary" style="margin:0;" onclick="closeModalDirect()">닫기</button>
-      </div>
-    </div>`;
-};
-
-// 출고리스트 생성
 window.generatePickingList = function() {
   const clientId = document.getElementById('pickClient').value;
   const date = document.getElementById('pickDate').value;
@@ -2125,6 +2126,7 @@ window.showClientDetail = async function(id) {
           <tr style="border-top:2px solid #f0f0f0;"><td style="padding:8px 0;font-weight:700;">현재 미수금</td><td style="text-align:right;font-weight:700;color:#e53935;font-size:17px;">${fmt(c.ar||0)}</td></tr>
         </table>
         <button class="btn btn-primary" style="margin:0 0 8px;" onclick="openEditClientModal('${c.id}')">✏️ 수정</button>
+        <button class="btn btn-red" style="margin:0 0 8px;" onclick="deleteClient('${c.id}','${c.name}')">🗑️ 거래처 삭제</button>
         <button class="btn btn-secondary" style="margin:0;" onclick="closeModalDirect()">닫기</button>
       </div>
     </div>`;
@@ -2284,6 +2286,7 @@ window.openEditProductModal = function(id) {
         </div>
         <div class="field-label">재고</div><input class="field-input" id="ep_stock" type="number" value="${p.stock||0}" />
         <button class="btn btn-primary" onclick="editProduct('${id}')">저장</button>
+        <button class="btn btn-red" style="margin:4px 16px 8px;" onclick="deleteProduct('${id}','${(p.brand||p.name||'').replace(/'/g,"\\'")}')">🗑️ 상품 삭제</button>
       </div>
     </div>`;
 };
@@ -2295,6 +2298,68 @@ window.editProduct = async function(id) {
     await updateDoc(doc(db,"products",id),{uid:document.getElementById('ep_uid').value||'',brand,name:brand,modelNo:document.getElementById('ep_modelNo').value||'',color:document.getElementById('ep_color').value||'',cost:parseInt(document.getElementById('ep_cost').value)||0,price:parseInt(document.getElementById('ep_price').value)||0,stock:parseInt(document.getElementById('ep_stock').value)||0});
     closeModalDirect(); alert('✅ 저장됐습니다!');
   }catch(e){alert('오류:'+e.message);}
+  showLoading(false);
+};
+
+// ===== 삭제 기능 =====
+window.deleteClient = async function(id, name) {
+  if(!confirm(`"${name}" 거래처를 삭제할까요?\n관련 매출 내역은 삭제되지 않습니다.`)) return;
+  showLoading(true);
+  try {
+    await deleteDoc(doc(db,'clients',id));
+    closeModalDirect();
+    alert('✅ 거래처가 삭제됐습니다.');
+  } catch(e) { alert('오류: '+e.message); }
+  showLoading(false);
+};
+
+window.deleteSale = async function(id) {
+  const s = window.dbSales.find(x=>x.id===id);
+  if(!s) return;
+  const tLabel={sale:'매출',payment:'입금',return:'반품'};
+  if(!confirm(`${s.date} ${s.clientName} ${tLabel[s.type]||'매출'} ${fmt(s.total)}\n이 내역을 삭제할까요?`)) return;
+  showLoading(true);
+  try {
+    // 미수금 복구
+    const client = window.dbClients.find(c=>c.id===s.clientId);
+    if(client) {
+      let arDelta = 0;
+      if(s.type==='sale'||!s.type) arDelta = -s.total;
+      else if(s.type==='return') arDelta = s.total;
+      else if(s.type==='payment') arDelta = s.total;
+      await updateDoc(doc(db,'clients',s.clientId),{ar: (client.ar||0)+arDelta});
+    }
+    await deleteDoc(doc(db,'sales',id));
+    closeModalDirect();
+    renderLedger();
+    alert('✅ 삭제됐습니다.');
+  } catch(e) { alert('오류: '+e.message); }
+  showLoading(false);
+};
+
+window.deleteProduct = async function(id, name) {
+  if(!confirm(`"${name}" 상품을 삭제할까요?`)) return;
+  showLoading(true);
+  try {
+    await deleteDoc(doc(db,'products',id));
+    closeModalDirect();
+    alert('✅ 상품이 삭제됐습니다.');
+  } catch(e) { alert('오류: '+e.message); }
+  showLoading(false);
+};
+
+window.resetAllData = async function() {
+  const answer = prompt('⚠️ 모든 데이터(거래처, 상품, 매출)를 삭제합니다.\n확인하려면 "초기화" 를 입력하세요:');
+  if(answer !== '초기화') { alert('취소됐습니다.'); return; }
+  showLoading(true);
+  try {
+    const collections = ['sales','clients','products'];
+    for(const col of collections) {
+      const snap = await getDocs(collection(db,col));
+      for(const d of snap.docs) await deleteDoc(d.ref);
+    }
+    alert('✅ 모든 데이터가 초기화됐습니다.');
+  } catch(e) { alert('오류: '+e.message); }
   showLoading(false);
 };
 
