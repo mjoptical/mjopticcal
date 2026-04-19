@@ -1386,6 +1386,11 @@ window.showSaleDetail = function(id) {
         ${s.supply?`<div style="font-size:12px;color:#888;margin-bottom:12px;">공급가: ${fmt(s.supply)} / VAT: ${fmt(s.vat)}</div>`:''}
         <button class="btn btn-red" style="margin:0 0 8px;" onclick="deleteSale('${s.id}')">🗑️ 매출 삭제</button>
         <button class="btn btn-secondary" style="margin:0;" onclick="closeModalDirect()">닫기</button>
+      </div>
+    </div>`;
+};
+
+// 출고리스트 생성
 window.generatePickingList = function() {
   const clientId = document.getElementById('pickClient').value;
   const date = document.getElementById('pickDate').value;
