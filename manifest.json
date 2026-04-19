@@ -1,6 +1,6 @@
 {
-  "name": "판매관리",
-  "short_name": "판매관리",
+  "name": "명진옵틱칼 판매관리",
+  "short_name": "명진옵틱칼",
   "start_url": "https://mjoptical.github.io/mjopticcal/",
   "scope": "https://mjoptical.github.io/mjopticcal/",
   "display": "standalone",
