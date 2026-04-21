@@ -2421,7 +2421,7 @@ window.uploadClientExcel = async function(input) {
     for(const r of rows){
       const name=(r['거래처명*']||r['거래처명']||'').toString().trim();
       if(!name){skip++;continue;}
-      const id = name.replace(/\s+/g,'_')+'_'+Date.now().toString(36);
+      const id = name.replace(/\s+/g,'_').replace(/\//g,'-').replace(/[^a-zA-Z0-9가-힣_\-]/g,'')+'_'+Date.now().toString(36);
       await setDoc(doc(db,'clients',id),{
         name,
         city:(r['도시']||'').toString().trim(),
