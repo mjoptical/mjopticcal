@@ -74,6 +74,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .cart-name{font-size:14px;font-weight:600;color:#222;}
 .cart-detail{font-size:11px;color:#888;margin-top:2px;}
 .qty-ctrl{display:flex;align-items:center;gap:6px;}
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0;}
 .qty-btn{width:30px;height:30px;border-radius:50%;border:1px solid #ddd;background:#f5f5f5;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-weight:600;}
 .qty-num{font-size:15px;font-weight:600;min-width:28px;text-align:center;}
 .cart-price{font-size:13px;font-weight:700;min-width:65px;text-align:right;}
@@ -369,6 +371,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
       <div class="barcode-wrap" style="padding-top:8px;position:relative;">
         <span style="position:absolute;left:26px;top:50%;transform:translateY(-50%);font-size:18px;pointer-events:none;">📷</span>
         <input class="barcode-input" id="returnBarcodeInput" placeholder="반품 바코드를 스캔하거나 입력하세요" autocomplete="off" style="border-color:#1D9E75;" />
+        <div id="returnBarcodeDropdown" style="display:none;position:absolute;left:0;right:0;top:100%;background:white;border:1px solid #1D9E75;border-top:none;border-radius:0 0 12px 12px;max-height:280px;overflow-y:auto;z-index:200;box-shadow:0 4px 12px rgba(0,0,0,0.12);"></div>
       </div>
       <!-- 반품 스캔 내역 (최신순) -->
       <div id="returnCartEmpty" style="text-align:center;padding:24px 20px;color:#bbb;">
@@ -1172,9 +1175,75 @@ window.setType = function(type) {
   };
 })();
 // 반품 바코드 스캔 이벤트
-document.getElementById('returnBarcodeInput').addEventListener('keydown',function(e){
-  if(e.key==='Enter'&&this.value.trim()){addToReturnByBarcode(this.value.trim());this.value='';e.preventDefault();}
-});
+// 반품 바코드 - 스캐너/수동 자동 구분
+(function(){
+  const inp = document.getElementById('returnBarcodeInput');
+  const drop = document.getElementById('returnBarcodeDropdown');
+  let charCount = 0;
+  let lastKeyTime = 0;
+
+  function closeDrop(){ drop.style.display='none'; drop.innerHTML=''; }
+
+  function openDrop(q){
+    const list = window.dbProducts.filter(p=>
+      (p.barcode||'').toLowerCase().includes(q)||
+      (p.brand||p.name||'').toLowerCase().includes(q)||
+      (p.modelNo||'').toLowerCase().includes(q)||
+      (p.uid||'').toLowerCase().includes(q)
+    ).slice(0,20);
+    if(!list.length){ closeDrop(); return; }
+    drop.innerHTML = list.map(p=>{
+      const color=p.color||p.colorno||p.colorNo||'';
+      return `<div onmousedown="selectReturnProduct('${p.id}')"
+        style="padding:13px 16px;border-bottom:1px solid #f5f5f5;cursor:pointer;display:flex;align-items:center;gap:10px;">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:15px;font-weight:700;color:#222;">${p.modelNo||''} ${color} <span style="color:#1D9E75;font-weight:600;">${p.brand||p.name}</span></div>
+          <div style="font-size:11px;color:#aaa;margin-top:2px;">${p.barcode||p.id}</div>
+        </div>
+        <div style="font-size:13px;font-weight:700;color:#e53935;white-space:nowrap;">${fmt(p.price||0)}</div>
+      </div>`;
+    }).join('');
+    drop.style.display='block';
+  }
+
+  inp.addEventListener('keydown', function(e){
+    const now = Date.now();
+    const gap = now - lastKeyTime;
+    lastKeyTime = now;
+    if(e.key==='Enter'){
+      e.preventDefault();
+      const val=this.value.trim();
+      if(!val) return;
+      closeDrop();
+      addToReturnByBarcode(val);
+      this.value='';
+      charCount=0;
+      return;
+    }
+    if(gap<40) charCount++; else charCount=1;
+  });
+
+  inp.addEventListener('input', function(){
+    const val=this.value.trim();
+    if(!val){ closeDrop(); return; }
+    if(charCount<=2) openDrop(val.toLowerCase());
+  });
+
+  inp.addEventListener('blur', function(){ setTimeout(closeDrop,200); });
+
+  window.selectReturnProduct = function(pid){
+    const p=window.dbProducts.find(x=>x.id===pid);
+    if(!p) return;
+    closeDrop();
+    inp.value='';
+    charCount=0;
+    const ex=window.returnCart.find(x=>x.pid===p.id);
+    if(ex){ex.qty++;}
+    else{window.returnCart.push({pid:p.id,barcode:p.barcode||p.id,brand:p.brand||p.name,modelNo:p.modelNo||'',color:p.color||p.colorno||'',uid:p.uid||'',price:p.price||0,cost:p.cost||0,qty:1});}
+    renderReturnCart();
+    inp.focus();
+  };
+})();
 
 window.addToCart = function(code) {
   const p=window.barcodeMap[code]; // ✅ O(1) Map 검색
@@ -1244,7 +1313,10 @@ window.renderCart = function() {
       </div>
       <div class="qty-ctrl">
         <button class="qty-btn" onclick="changeQty(${i},-1)">−</button>
-        <span class="qty-num">${item.qty}</span>
+        <input type="number" inputmode="numeric" class="qty-num" value="${item.qty}" min="1"
+          style="width:44px;text-align:center;border:1px solid #ddd;border-radius:8px;font-size:16px;font-weight:700;padding:4px 2px;-moz-appearance:textfield;-webkit-appearance:none;appearance:none;"
+          onchange="setQty(${i},this.value)"
+          onclick="this.select()">
         <button class="qty-btn" onclick="changeQty(${i},1)">+</button>
       </div>
       <div class="cart-price" style="color:#1D9E75;">${fmt(item.qty*item.price)}</div>
@@ -1253,6 +1325,7 @@ window.renderCart = function() {
 };
 
 window.changeQty=(i,d)=>{window.cart[i].qty+=d;if(window.cart[i].qty<=0)window.cart.splice(i,1);renderCart();};
+window.setQty=(i,v)=>{const n=parseInt(v)||1;if(n<=0){window.cart.splice(i,1);}else{window.cart[i].qty=n;}renderCart();};
 window.removeItem=(i)=>{window.cart.splice(i,1);renderCart();};
 window.clearCart=()=>{window.cart=[];renderCart();};
 
@@ -1337,7 +1410,10 @@ window.renderReturnCart = function() {
       </div>
       <div class="qty-ctrl">
         <button class="qty-btn" onclick="changeReturnQty(${i},-1)">−</button>
-        <span class="qty-num">${item.qty}</span>
+        <input type="number" inputmode="numeric" class="qty-num" value="${item.qty}" min="1"
+          style="width:44px;text-align:center;border:1px solid #ddd;border-radius:8px;font-size:16px;font-weight:700;padding:4px 2px;-moz-appearance:textfield;-webkit-appearance:none;appearance:none;"
+          onchange="setReturnQty(${i},this.value)"
+          onclick="this.select()">
         <button class="qty-btn" onclick="changeReturnQty(${i},1)">+</button>
       </div>
       <div class="cart-price" style="color:#e53935;">-${fmt(item.qty*item.price)}</div>
@@ -1346,6 +1422,7 @@ window.renderReturnCart = function() {
 };
 
 window.changeReturnQty=(i,d)=>{window.returnCart[i].qty+=d;if(window.returnCart[i].qty<=0)window.returnCart.splice(i,1);renderReturnCart();};
+window.setReturnQty=(i,v)=>{const n=parseInt(v)||1;if(n<=0){window.returnCart.splice(i,1);}else{window.returnCart[i].qty=n;}renderReturnCart();};
 window.removeReturnItem=(i)=>{window.returnCart.splice(i,1);renderReturnCart();};
 window.clearReturnCart=()=>{window.returnCart=[];renderReturnCart();};
 
