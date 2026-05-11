@@ -1875,6 +1875,7 @@ window.printPickingList = function() {
       <button onclick="window.closePickPreview()" style="background:rgba(255,255,255,0.2);border:none;color:white;font-size:15px;font-weight:600;padding:8px 16px;border-radius:8px;cursor:pointer;">← 뒤로</button>
       <span style="font-size:13px;font-weight:700;text-align:center;">출고리스트<br><span style="font-size:11px;font-weight:400;opacity:0.9;">${date}_${client.name}</span></span>
       <button onclick="window.savePickPDF()" style="background:white;border:none;color:#1D9E75;font-size:15px;font-weight:700;padding:8px 16px;border-radius:8px;cursor:pointer;">📥 PDF저장</button>
+      <button onclick="window.savePickExcel()" style="background:#217346;border:none;color:white;font-size:15px;font-weight:700;padding:8px 16px;border-radius:8px;cursor:pointer;">📊 엑셀</button>
     </div>
     <div id="pickPrintBody" style="padding-top:60px;background:#888;display:flex;flex-direction:column;align-items:center;gap:8px;padding-bottom:16px;">
       ${pages.map((pageRows, pi) => {
@@ -1909,21 +1910,31 @@ window.generateStatement = function() {
   if(!clientId||!date){alert('날짜와 거래처를 선택해주세요');return;}
   const client=window.dbClients.find(c=>c.id===clientId);
   const daySales=window.dbSales.filter(s=>s.date===date&&s.clientId===clientId&&(s.type==='sale'||!s.type));
-  if(!daySales.length){alert('해당 날짜에 매출 내역이 없습니다');return;}
+  const dayReturns=window.dbSales.filter(s=>s.date===date&&s.clientId===clientId&&s.type==='return');
+  if(!daySales.length&&!dayReturns.length){alert('해당 날짜에 매출/반품 내역이 없습니다');return;}
   // 당일 입금액 조회
   const dayPayments=window.dbSales.filter(s=>s.date===date&&s.clientId===clientId&&s.type==='payment');
   const dayPaymentTotal=dayPayments.reduce((s,p)=>s+(p.amount||p.total||0),0);
-  // 브랜드별 합산
+  // 브랜드별 합산 (매출)
   const brandMap={};
   daySales.forEach(s=>s.items.forEach(it=>{
     const k=it.brand||it.name;
-    if(!brandMap[k])brandMap[k]={brand:k,qty:0,price:it.price,total:0};
+    if(!brandMap[k])brandMap[k]={brand:k,qty:0,price:it.price,total:0,isReturn:false};
     brandMap[k].qty+=it.qty; brandMap[k].total+=it.qty*it.price;
   }));
-  const rows=Object.values(brandMap);
-  const grandTotal=rows.reduce((s,r)=>s+r.total,0);
+  // 반품 브랜드별 합산 (마이너스 행)
+  const returnMap={};
+  dayReturns.forEach(s=>s.items.forEach(it=>{
+    const k=(it.brand||it.name)+'__return';
+    if(!returnMap[k])returnMap[k]={brand:(it.brand||it.name)+' (반품)',qty:0,price:it.price,total:0,isReturn:true};
+    returnMap[k].qty+=it.qty; returnMap[k].total+=it.qty*it.price;
+  }));
+  const rows=[...Object.values(brandMap), ...Object.values(returnMap)];
+  const saleTotal=Object.values(brandMap).reduce((s,r)=>s+r.total,0);
+  const returnTotal=Object.values(returnMap).reduce((s,r)=>s+r.total,0);
+  const grandTotal=saleTotal-returnTotal;
   const ci=window.companyInfo||{};
-  const prevAr=(client.ar||0)-grandTotal; // 전잔금 = 현재미수금 - 오늘매출
+  const prevAr=(client.ar||0)-grandTotal;
   const janggeum=Math.max(0,prevAr)+grandTotal-dayPaymentTotal;
   window.stmtData={client,date,rows,grandTotal,prevAr,dayPaymentTotal,janggeum,ci};
 
@@ -1934,7 +1945,7 @@ window.generateStatement = function() {
       <div style="margin-bottom:8px;"><strong>${client.name}</strong> 귀하</div>
       <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px;">
         <tr style="background:#f5f5f5;"><th style="padding:6px;border:1px solid #ddd;">품목</th><th style="padding:6px;border:1px solid #ddd;">수량</th><th style="padding:6px;border:1px solid #ddd;">단가</th><th style="padding:6px;border:1px solid #ddd;">공급가액</th><th style="padding:6px;border:1px solid #ddd;">세액</th></tr>
-        ${rows.map(r=>{const {supply,vat}=calcVat(r.total);return`<tr><td style="padding:6px;border:1px solid #eee;">${r.brand}</td><td style="padding:6px;border:1px solid #eee;text-align:center;">${r.qty}</td><td style="padding:6px;border:1px solid #eee;text-align:right;">${fmt(r.price)}</td><td style="padding:6px;border:1px solid #eee;text-align:right;">${fmt(supply)}</td><td style="padding:6px;border:1px solid #eee;text-align:right;">${fmt(vat)}</td></tr>`;}).join('')}
+        ${rows.map(r=>{const {supply,vat}=calcVat(r.total);const minus=r.isReturn?'-':'';const color=r.isReturn?'color:#c62828;':'';return`<tr><td style="padding:6px;border:1px solid #eee;${color}">${r.brand}</td><td style="padding:6px;border:1px solid #eee;text-align:center;${color}">${r.qty}</td><td style="padding:6px;border:1px solid #eee;text-align:right;">${fmt(r.price)}</td><td style="padding:6px;border:1px solid #eee;text-align:right;${color}">${minus}${fmt(supply)}</td><td style="padding:6px;border:1px solid #eee;text-align:right;${color}">${minus}${fmt(vat)}</td></tr>`;}).join('')}
       </table>
       <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;"><span>전잔금</span><span>${fmt(Math.max(0,prevAr))}</span></div>
       <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;"><span>합계</span><span style="color:#1D9E75;font-weight:700;">${fmt(grandTotal)}</span></div>
@@ -1959,22 +1970,23 @@ window.printStatement = function() {
       if(i<rows.length){
         const r=rows[i];
         const {supply,vat}=calcVat(r.total);
+        const minus=r.isReturn?'-':'';
         html+=`<tr style="height:6mm;">
-          <td style="border:1px solid #bbb;padding:2px 4px;text-align:center;vertical-align:middle;font-size:8pt;">${r.brand}</td>
-          <td style="border:1px solid #bbb;padding:2px 3px;text-align:center;vertical-align:middle;font-size:8pt;">${r.qty}</td>
-          <td style="border:1px solid #bbb;padding:2px 4px;text-align:right;vertical-align:middle;font-size:8pt;">${fmt(r.price)}</td>
-          <td style="border:1px solid #bbb;padding:2px 4px;text-align:right;vertical-align:middle;font-size:8pt;">${fmt(supply)}</td>
-          <td style="border:1px solid #bbb;padding:2px 4px;text-align:right;vertical-align:middle;font-size:8pt;">${fmt(vat)}</td>
-          <td style="border:1px solid #bbb;padding:2px 4px;font-size:8pt;"></td>
+          <td style="border:1px solid #000;padding:2px 4px;text-align:center;vertical-align:middle;font-size:8pt;${r.isReturn?'color:#c62828;':''}">${r.brand}</td>
+          <td style="border:1px solid #000;padding:2px 3px;text-align:center;vertical-align:middle;font-size:8pt;${r.isReturn?'color:#c62828;':''}">${r.qty}</td>
+          <td style="border:1px solid #000;padding:2px 4px;text-align:right;vertical-align:middle;font-size:8pt;">${fmt(r.price)}</td>
+          <td style="border:1px solid #000;padding:2px 4px;text-align:right;vertical-align:middle;font-size:8pt;${r.isReturn?'color:#c62828;':''}">${minus}${fmt(supply)}</td>
+          <td style="border:1px solid #000;padding:2px 4px;text-align:right;vertical-align:middle;font-size:8pt;${r.isReturn?'color:#c62828;':''}">${minus}${fmt(vat)}</td>
+          <td style="border:1px solid #000;padding:2px 4px;font-size:8pt;"></td>
         </tr>`;
       } else {
         html+=`<tr style="height:6mm;">
-          <td style="border:1px solid #bbb;padding:0;">&nbsp;</td>
-          <td style="border:1px solid #bbb;padding:0;">&nbsp;</td>
-          <td style="border:1px solid #bbb;padding:0;">&nbsp;</td>
-          <td style="border:1px solid #bbb;padding:0;">&nbsp;</td>
-          <td style="border:1px solid #bbb;padding:0;">&nbsp;</td>
-          <td style="border:1px solid #bbb;padding:0;">&nbsp;</td>
+          <td style="border:1px solid #000;padding:0;">&nbsp;</td>
+          <td style="border:1px solid #000;padding:0;">&nbsp;</td>
+          <td style="border:1px solid #000;padding:0;">&nbsp;</td>
+          <td style="border:1px solid #000;padding:0;">&nbsp;</td>
+          <td style="border:1px solid #000;padding:0;">&nbsp;</td>
+          <td style="border:1px solid #000;padding:0;">&nbsp;</td>
         </tr>`;
       }
     }
@@ -1984,17 +1996,17 @@ window.printStatement = function() {
   const makeStmt = (copyLabel) => {
     const prevArAmt=Math.max(0,prevAr);
     const paymentDisplay=dayPaymentTotal>0?fmt(dayPaymentTotal):'';
-    const L = 'border:1px solid #444;padding:2px 3px;background:#f5f5f5;font-weight:600;text-align:center;vertical-align:middle;white-space:nowrap;font-size:7pt;';
-    const V = 'border:1px solid #444;padding:2px 4px;text-align:center;vertical-align:middle;font-size:8pt;overflow:hidden;white-space:nowrap;';
+    const L = 'border:1px solid #000;padding:2px 3px;background:#f5f5f5;font-weight:600;text-align:center;vertical-align:middle;white-space:nowrap;font-size:7pt;';
+    const V = 'border:1px solid #000;padding:2px 4px;text-align:center;vertical-align:middle;font-size:8pt;overflow:hidden;white-space:nowrap;';
     const RH = 'height:6mm;';
     return `
     <div style="width:100%;min-height:130mm;padding:4mm 4mm 4mm;box-sizing:border-box;overflow:hidden;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8mm;">
-        <div style="font-size:8pt;color:#333;">Date : ${date}</div>
-        <div style="border:2px solid #333;padding:1px 7px;font-size:8pt;font-weight:700;">${copyLabel}</div>
+        <div style="font-size:8pt;color:#000;">Date : ${date}</div>
+        <div style="border:2px solid #000;padding:1px 7px;font-size:8pt;font-weight:700;">${copyLabel}</div>
       </div>
       <div style="text-align:center;font-size:13pt;font-weight:700;letter-spacing:4px;margin-bottom:1mm;padding-bottom:0.5mm;">
-        <span style="border-bottom:1.5px solid #333;padding:0 10mm 0.5mm;">거 래 명 세 표</span>
+        <span style="border-bottom:1.5px solid #000;padding:0 10mm 0.5mm;">거 래 명 세 표</span>
       </div>
       <div style="font-size:9pt;margin-bottom:0.8mm;"><strong>${client.name}</strong> 귀하</div>
       <table style="width:100%;border-collapse:collapse;margin-bottom:1mm;table-layout:fixed;">
@@ -2011,51 +2023,51 @@ window.printStatement = function() {
         </tr>
         <tr style="${RH}">
           <td style="${L}">주&nbsp;&nbsp;&nbsp;소</td>
-          <td colspan="5" style="border:1px solid #444;padding:2px 4px 2px 8px;text-align:left;vertical-align:middle;font-size:8pt;">${ci.addr||''}</td>
+          <td colspan="5" style="border:1px solid #000;padding:2px 4px 2px 8px;text-align:left;vertical-align:middle;font-size:8pt;">${ci.addr||''}</td>
         </tr>
       </table>
       <table style="width:100%;border-collapse:collapse;margin-bottom:1mm;font-size:8pt;">
         <thead>
           <tr style="${RH}">
-            <th style="background:#efefef;border:1px solid #444;padding:2px 3px;text-align:center;width:26%;white-space:nowrap;">품&nbsp;&nbsp;목</th>
-            <th style="background:#efefef;border:1px solid #444;padding:2px 3px;text-align:center;width:8%;">수량</th>
-            <th style="background:#efefef;border:1px solid #444;padding:2px 3px;text-align:center;width:15%;">단&nbsp;가</th>
-            <th style="background:#efefef;border:1px solid #444;padding:2px 3px;text-align:center;width:18%;">공급가액</th>
-            <th style="background:#efefef;border:1px solid #444;padding:2px 3px;text-align:center;width:13%;">세&nbsp;액</th>
-            <th style="background:#efefef;border:1px solid #444;padding:2px 3px;text-align:center;width:20%;">비&nbsp;고</th>
+            <th style="background:#efefef;border:1px solid #000;padding:2px 3px;text-align:center;width:26%;white-space:nowrap;">품&nbsp;&nbsp;목</th>
+            <th style="background:#efefef;border:1px solid #000;padding:2px 3px;text-align:center;width:8%;">수량</th>
+            <th style="background:#efefef;border:1px solid #000;padding:2px 3px;text-align:center;width:15%;">단&nbsp;가</th>
+            <th style="background:#efefef;border:1px solid #000;padding:2px 3px;text-align:center;width:18%;">공급가액</th>
+            <th style="background:#efefef;border:1px solid #000;padding:2px 3px;text-align:center;width:13%;">세&nbsp;액</th>
+            <th style="background:#efefef;border:1px solid #000;padding:2px 3px;text-align:center;width:20%;">비&nbsp;고</th>
           </tr>
         </thead>
         <tbody>${makeRowsHtml()}</tbody>
         <tfoot>
           <tr style="${RH}">
-            <td colspan="3" style="border:1px solid #bbb;padding:2px 4px;background:#f5f5f5;font-weight:700;text-align:center;">합&nbsp;&nbsp;계</td>
-            <td style="border:1px solid #bbb;padding:2px 4px;text-align:right;font-weight:700;">${fmt(totalSupply)}</td>
-            <td style="border:1px solid #bbb;padding:2px 4px;text-align:right;font-weight:700;">${fmt(totalVat)}</td>
-            <td style="border:1px solid #bbb;padding:2px 4px;"></td>
+            <td colspan="3" style="border:1px solid #000;padding:2px 4px;background:#f5f5f5;font-weight:700;text-align:center;">합&nbsp;&nbsp;계</td>
+            <td style="border:1px solid #000;padding:2px 4px;text-align:right;font-weight:700;">${fmt(totalSupply)}</td>
+            <td style="border:1px solid #000;padding:2px 4px;text-align:right;font-weight:700;">${fmt(totalVat)}</td>
+            <td style="border:1px solid #000;padding:2px 4px;"></td>
           </tr>
         </tfoot>
       </table>
       <table style="width:100%;border-collapse:collapse;font-size:8pt;">
         <tr style="${RH}">
-          <td rowspan="4" style="border:1px solid #444;padding:2px 6px;width:42%;vertical-align:middle;font-size:9pt;">
+          <td rowspan="4" style="border:1px solid #000;padding:2px 6px;width:42%;vertical-align:middle;font-size:9pt;">
             <div style="display:flex;justify-content:space-between;align-items:center;padding:0 2px;">
               <span>인수자확인</span><span style="margin-left:auto;">인)</span>
             </div>
           </td>
-          <td style="border:1px solid #444;padding:2px 5px;background:#f5f5f5;text-align:center;font-weight:600;white-space:nowrap;width:50px;">전 잔 금</td>
-          <td style="border:1px solid #444;padding:2px 5px;text-align:right;width:85px;">${fmt(prevArAmt)}</td>
+          <td style="border:1px solid #000;padding:2px 5px;background:#f5f5f5;text-align:center;font-weight:600;white-space:nowrap;width:50px;">전 잔 금</td>
+          <td style="border:1px solid #000;padding:2px 5px;text-align:right;width:85px;">${fmt(prevArAmt)}</td>
         </tr>
         <tr style="${RH}">
-          <td style="border:1px solid #444;padding:2px 5px;background:#f5f5f5;text-align:center;font-weight:600;white-space:nowrap;">합&nbsp;&nbsp;&nbsp;계</td>
-          <td style="border:1px solid #444;padding:2px 5px;text-align:right;">${fmt(grandTotal)}</td>
+          <td style="border:1px solid #000;padding:2px 5px;background:#f5f5f5;text-align:center;font-weight:600;white-space:nowrap;">합&nbsp;&nbsp;&nbsp;계</td>
+          <td style="border:1px solid #000;padding:2px 5px;text-align:right;">${fmt(grandTotal)}</td>
         </tr>
         <tr style="${RH}">
-          <td style="border:1px solid #444;padding:2px 5px;background:#f5f5f5;text-align:center;font-weight:600;white-space:nowrap;">입&nbsp;&nbsp;&nbsp;금</td>
-          <td style="border:1px solid #444;padding:2px 5px;text-align:right;color:#1565C0;font-weight:${dayPaymentTotal>0?'700':'400'};">${paymentDisplay}</td>
+          <td style="border:1px solid #000;padding:2px 5px;background:#f5f5f5;text-align:center;font-weight:600;white-space:nowrap;">입&nbsp;&nbsp;&nbsp;금</td>
+          <td style="border:1px solid #000;padding:2px 5px;text-align:right;color:#1565C0;font-weight:${dayPaymentTotal>0?'700':'400'};">${paymentDisplay}</td>
         </tr>
         <tr style="${RH}">
-          <td style="border:1px solid #444;padding:2px 5px;background:#f5f5f5;text-align:center;font-weight:700;white-space:nowrap;color:#c62828;">잔&nbsp;&nbsp;&nbsp;금</td>
-          <td style="border:1px solid #444;padding:2px 5px;text-align:right;font-weight:700;color:#c62828;">${fmt(janggeum)}</td>
+          <td style="border:1px solid #000;padding:2px 5px;background:#f5f5f5;text-align:center;font-weight:700;white-space:nowrap;color:#c62828;">잔&nbsp;&nbsp;&nbsp;금</td>
+          <td style="border:1px solid #000;padding:2px 5px;text-align:right;font-weight:700;color:#c62828;">${fmt(janggeum)}</td>
         </tr>
       </table>
     </div>`;
@@ -2063,7 +2075,7 @@ window.printStatement = function() {
 
   const stmtContent =
     makeStmt('공급자') +
-    `<div style="text-align:center;font-size:8pt;color:#999;border-top:1px dashed #bbb;padding:1mm 0;margin:3mm 5mm;letter-spacing:2px;">✂ 절 취 선 ✂</div>` +
+    `<div style="text-align:center;font-size:8pt;color:#000;border-top:1px dashed #000;padding:1mm 0;margin:3mm 5mm;letter-spacing:2px;">✂ 절 취 선 ✂</div>` +
     makeStmt('공급받는자');
 
   const appEl = document.getElementById('app');
@@ -3257,6 +3269,44 @@ window.saveStmtPDF = function() {
     el.style.paddingTop = origPad;
     if(btn){ btn.textContent='📥 PDF저장'; btn.disabled=false; }
   });
+};
+
+window.savePickExcel = function() {
+  if(!window.pickData) return;
+  const {client, date, rows, totalQty} = window.pickData;
+  const ci = window.companyInfo||{};
+
+  // 헤더
+  const header = [
+    ['출고리스트'],
+    [`공급처: ${ci.company||''} | ${ci.tel||''}`],
+    [`거래처: ${client.name}`, '', '', '', `날짜: ${date}`, `총수량: ${totalQty}개`],
+    [],
+    ['브랜드', '모델번호', '컬러', '수량', '확인']
+  ];
+
+  // 데이터 행
+  const dataRows = rows.map(r => [r.brand, r.modelNo, r.color||'', r.qty, '']);
+
+  // 합계
+  const footer = [['합계', '', '', totalQty, '']];
+
+  const aoa = [...header, ...dataRows, [], ...footer];
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+  // 열 너비
+  ws['!cols'] = [{wch:20},{wch:14},{wch:10},{wch:8},{wch:8}];
+
+  // 병합 (타이틀)
+  ws['!merges'] = [
+    {s:{r:0,c:0}, e:{r:0,c:4}},
+    {s:{r:1,c:0}, e:{r:1,c:4}},
+  ];
+
+  XLSX.utils.book_append_sheet(wb, ws, '출고리스트');
+  XLSX.writeFile(wb, `출고리스트_${date}_${client.name}.xlsx`);
 };
 
 window.savePickPDF = function() {
